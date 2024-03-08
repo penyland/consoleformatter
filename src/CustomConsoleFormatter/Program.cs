@@ -15,7 +15,8 @@ using var loggerFactory = LoggerFactory.Create(builder =>
         //.SetMinimumLevel(LogLevel.Information)
         .AddCustomFormatter(options =>
         {
-            options.CustomPrefix = "[";
+            options.CustomPrefix = "\"";
+            options.CustomSuffix = "\"";
             options.TimestampFormat = "HH:mm:ss ";
         });
 });
@@ -44,12 +45,9 @@ var logger = loggerFactory.CreateLogger<Program>();
 //    }
 //}
 
-var string1 = "Peter";
-var string2 = "Emma";
-
-//logger.LogTrace("This is a trace message");
-//logger.LogDebug("This is a debug message");
-logger.LogInformation("This is an information message: {string1} and {string2}", string1, string2);
+logger.LogTrace("This is a trace message");
+logger.LogDebug("This is a debug message");
+logger.LogInformation("This is an information message with colored data types: {string1} {int} {double}", "string", 1976, 0.5);
 logger.LogWarning("This is a warning message");
-//logger.LogError("This is an error message");
-//logger.LogCritical("This is a critical message");
+logger.LogError("This is an error message");
+logger.LogCritical("This is a critical message");

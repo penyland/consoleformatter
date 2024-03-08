@@ -2,7 +2,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
-using System.Collections;
 using System.Text;
 
 namespace CustomConsoleFormatter;
@@ -24,6 +23,8 @@ public static class ConsoleLoggerExtensions
 public sealed class CustomOptions : ConsoleFormatterOptions
 {
     public string? CustomPrefix { get; set; }
+
+    public string? CustomSuffix { get; set; }
 }
 
 public sealed class CustomFormatter : ConsoleFormatter, IDisposable
@@ -47,7 +48,7 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
             if (state is IReadOnlyCollection<KeyValuePair<string, object>> stateProperties)
             {
                 var messageFormat = stateProperties.FirstOrDefault(k => k.Key == "{OriginalFormat}").Value.ToString();
-                var sb = new StringBuilder(messageFormat);
+                var sb = new StringBuilder($"{GetForegroundColorEscapeCode(ConsoleColor.White)}{messageFormat}");
 
                 foreach (var item in stateProperties)
                 {
@@ -56,67 +57,26 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
                         continue;
                     }
 
-                    // WriteItem(writer, item);
-
-                    var result = item.Value switch
-                    {
-                        bool boolValue => boolValue.ToString(),
-                        int intValue => intValue.ToString(),
-                        string stringValue => stringValue.ToString(),
-                        _ => stateProperties.ToString(),
-                    };
-
-                    sb.Replace($"{{{item.Key}}}", $"\"{result}\"");
+                    var formattedItem = $"{GetForegroundColorEscapeCode(GetItemColor(item))}{formatterOptions.CustomPrefix}{item.Value}{formatterOptions.CustomSuffix}{GetForegroundColorEscapeCode(ConsoleColor.White)}";
+                    sb.Replace($"{{{item.Key}}}", formattedItem);
                 }
 
                 return sb.ToString();
             }
-
-            //var parameters = (state as IEnumerable<KeyValuePair<string, object>>)?.ToDictionary(i => i.Key, i => i.Value);
-
-            //if (parameters != null && parameters.Count > 1)
-            //{
-            //    var formatString = (string)parameters.LastOrDefault().Value;
-            //    var dict = parameters.Take(parameters.Count - 1);
-
-            //    var temp = GetForegroundColorEscapeCode(ConsoleColor.White) + formatString;
-
-            //    // Get position of all } characters in the format string
-            //    var indexes = temp.AllIndexesOf('}').ToList();
-
-            //    // Insert string at each position + 1 character to account for the } character
-            //    for (var i = 0; i < indexes.Count; i++)
-            //    {
-            //        temp = temp.Insert(indexes[i]+1, GetForegroundColorEscapeCode(ConsoleColor.White));
-            //    }
-
-            //    var sb = new StringBuilder(temp);
-            //    foreach (var d in dict)
-            //    {
-            //        var j = $"{ConsoleThemeStyleString}\"{d.Value}\"{DefaultForegroundColor}";
-            //        sb.Replace("{" + d.Key + "}", j);
-            //    }
-
-            //    return sb.ToString();
-            //}
-            //else
-            //{
-            //    return state.ToString();
-            //}
 
             return state!.ToString();
         };
 
         var message = formatter.Invoke(textWriter, logEntry.State, logEntry.Exception);
 
-        var message2 = logEntry.Formatter?.Invoke(logEntry.State, logEntry.Exception);
-
         if (message is null)
         {
             return;
         }
 
-        textWriter.Write(formatterOptions.CustomPrefix);
+        textWriter.Write(GetForegroundColorEscapeCode(ConsoleColor.Blue)); // reset to default foreground color
+        textWriter.Write("[");
+        textWriter.Write(DefaultForegroundColor); // reset to default foreground color
         WriteTimeStamp(textWriter);
 
         var logLevelString = GetLogLevelString(logEntry);
@@ -126,6 +86,7 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
             WriteColoredMessage(textWriter, logLevelString, logLevelColors?.Foreground, logLevelColors?.Background);
         }
 
+        textWriter.Write(GetForegroundColorEscapeCode(ConsoleColor.Blue)); // reset to default foreground color
         textWriter.Write("]");
         textWriter.Write(" ");
         textWriter.Write(message);
@@ -148,6 +109,31 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
         textWriter.Write($"""
             {now.ToString(formatterOptions.TimestampFormat)}
             """);
+    }
+
+    public static void WriteColoredString(StringBuilder sb, string message, ConsoleColor? foreground, ConsoleColor? background = null)
+    {
+        if (background.HasValue)
+        {
+            sb.Append(GetBackgroundColorEscapeCode(background.Value));
+        }
+
+        if (foreground.HasValue)
+        {
+            sb.Append(GetForegroundColorEscapeCode(foreground.Value));
+        }
+
+        sb.Append(message);
+
+        if (foreground.HasValue)
+        {
+            sb.Append(DefaultForegroundColor); // reset to default foreground color
+        }
+
+        if (background.HasValue)
+        {
+            sb.Append(DefaultBackgroundColor); // reset to the background color
+        }
     }
 
     public static void WriteColoredMessage(TextWriter textWriter, string message, ConsoleColor? foreground, ConsoleColor? background = null)
@@ -183,7 +169,7 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
             LogLevel.Debug => "DBG",
             LogLevel.Warning => "WRN",
             LogLevel.Error => "ERR",
-            LogLevel.Critical => "CRITICAL",
+            LogLevel.Critical => "CRI",
             _ => throw new NotImplementedException()
         };
     }
@@ -240,25 +226,51 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
         };
     }
 
-    private readonly struct LogValues : IReadOnlyList<KeyValuePair<string, object?>>
+    private static string? SetItemColor(KeyValuePair<string, object> item)
     {
-        public KeyValuePair<string, object?> this[int index]
+        var result = item.Value switch
         {
-            get
-            {
-                return new KeyValuePair<string, object?>("{}", "value");
-            }
-        }
+            bool boolValue => WriteBoolean(boolValue),
+            int intValue => WriteInt(intValue),
+            string stringValue => WriteString(stringValue),
+            double doubleValue => WriteDouble(doubleValue),
+            decimal decimalValue => WriteDecimal(decimalValue),
+            DateTime dateTimeValue => WriteDateTime(dateTimeValue),
+            TimeSpan timeSpanValue => WriteTimeSpan(timeSpanValue),
+            Guid guidValue => WriteGuid(guidValue),
+            _ => item.Value.ToString(),
+        };
 
-        public int Count => 1;
-
-        public IEnumerator<KeyValuePair<string, object?>> GetEnumerator()
-        {
-            yield return this[0];
-        }
-
-        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+        return result;
     }
 
-    internal record Log(IEnumerable<string> Parameters, string FormatString);
+    private static ConsoleColor GetItemColor(KeyValuePair<string, object> item) =>
+        item.Value switch
+        {
+            bool _ => ConsoleColor.Blue,
+            int _ => ConsoleColor.DarkGreen,
+            string _ => ConsoleColor.DarkYellow,
+            double _ => ConsoleColor.DarkBlue,
+            decimal _ => ConsoleColor.DarkMagenta,
+            DateTime _ => ConsoleColor.DarkCyan,
+            TimeSpan _ => ConsoleColor.Gray,
+            Guid _ => ConsoleColor.Red,
+            _ => ConsoleColor.White,
+        };
+
+    private static string WriteBoolean(bool value) => value.ToString();
+
+    private static string WriteInt(int value) => WriteInt(value);
+
+    private static string WriteString(string value) => $"{ConsoleThemeStyleString}{value}{GetForegroundColorEscapeCode(ConsoleColor.White)}";
+
+    private static string WriteDouble(double value) => value.ToString();
+
+    private static string WriteDecimal(decimal value) => value.ToString();
+
+    private static string WriteDateTime(DateTime value) => value.ToString();
+
+    private static string WriteTimeSpan(TimeSpan value) => value.ToString();
+
+    private static string WriteGuid(Guid value) => value.ToString();
 }
