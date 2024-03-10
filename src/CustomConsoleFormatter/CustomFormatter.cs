@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
 using System.Text;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace CustomConsoleFormatter;
 
@@ -22,9 +23,11 @@ public static class ConsoleLoggerExtensions
 
 public sealed class CustomOptions : ConsoleFormatterOptions
 {
-    public string? CustomPrefix { get; set; }
+    public string? CustomPrefix { get; set; } = "\"";
 
-    public string? CustomSuffix { get; set; }
+    public string? CustomSuffix { get; set; } = "\"";
+
+    public AnsiColorTheme? Theme { get; set; } = AnsiColorThemes.Code;
 }
 
 public sealed class CustomFormatter : ConsoleFormatter, IDisposable
@@ -226,13 +229,13 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
         };
     }
 
-    private static string? SetItemColor(KeyValuePair<string, object> item)
+    private static string? ApplyTheme(KeyValuePair<string, object> item, AnsiColorTheme theme)
     {
         var result = item.Value switch
         {
             bool boolValue => WriteBoolean(boolValue),
             int intValue => WriteInt(intValue),
-            string stringValue => WriteString(stringValue),
+            string stringValue => WriteString(stringValue, theme),
             double doubleValue => WriteDouble(doubleValue),
             decimal decimalValue => WriteDecimal(decimalValue),
             DateTime dateTimeValue => WriteDateTime(dateTimeValue),
@@ -262,7 +265,13 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
 
     private static string WriteInt(int value) => WriteInt(value);
 
-    private static string WriteString(string value) => $"{ConsoleThemeStyleString}{value}{GetForegroundColorEscapeCode(ConsoleColor.White)}";
+    private static string WriteString(string value, AnsiColorTheme theme)
+    {
+        //var stringStyle = theme.GetStyle(ThemeStyle.String);
+        //var textStyle = theme.GetStyle(ThemeStyle.Text);
+
+        return $"{ConsoleThemeStyleString}{value}{GetForegroundColorEscapeCode(ConsoleColor.White)}";
+    }
 
     private static string WriteDouble(double value) => value.ToString();
 
