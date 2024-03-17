@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
 using System.Text;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace CustomConsoleFormatter;
 
@@ -32,9 +31,7 @@ public sealed class CustomOptions : ConsoleFormatterOptions
 
 public sealed class CustomFormatter : ConsoleFormatter, IDisposable
 {
-    private const string DefaultForegroundColor = "\x1B[39m\x1B[22m"; // reset to default foreground color
-    private const string DefaultBackgroundColor = "\x1B[49m"; // reset to the background color
-    private const string ConsoleThemeStyleString = "\x1b[38;5;0216m";
+    private const string AnsiStyleReset = "\x1b[0m";
     private readonly IDisposable? optionsReloadToken;
     private CustomOptions formatterOptions;
 
@@ -51,7 +48,7 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
             if (state is IReadOnlyCollection<KeyValuePair<string, object>> stateProperties)
             {
                 var messageFormat = stateProperties.FirstOrDefault(k => k.Key == "{OriginalFormat}").Value.ToString();
-                var sb = new StringBuilder($"{GetForegroundColorEscapeCode(ConsoleColor.White)}{messageFormat}");
+                var sb = new StringBuilder($"{messageFormat}");
 
                 foreach (var item in stateProperties)
                 {
@@ -60,7 +57,9 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
                         continue;
                     }
 
-                    var formattedItem = $"{GetForegroundColorEscapeCode(GetItemColor(item))}{formatterOptions.CustomPrefix}{item.Value}{formatterOptions.CustomSuffix}{GetForegroundColorEscapeCode(ConsoleColor.White)}";
+                    var itemThemeStyle = GetItemThemeStyle(item, formatterOptions.Theme!);
+                    var defaultForegroundColor = formatterOptions.Theme!.GetStyle(ThemeStyle.Invalid);
+                    var formattedItem = $"{itemThemeStyle}{formatterOptions.CustomPrefix}{item.Value}{formatterOptions.CustomSuffix}{defaultForegroundColor}";
                     sb.Replace($"{{{item.Key}}}", formattedItem);
                 }
 
@@ -77,31 +76,32 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
             return;
         }
 
-        textWriter.Write(GetForegroundColorEscapeCode(ConsoleColor.Blue)); // reset to default foreground color
-        textWriter.Write("[");
-        textWriter.Write(DefaultForegroundColor); // reset to default foreground color
+        // [HH:mm:ss INF]
+        WriteTagStart(textWriter);
         WriteTimeStamp(textWriter);
+        WriteLogLevel(textWriter, logEntry.LogLevel);
+        WriteTagEnd(textWriter);
 
-        var logLevelString = GetLogLevelString(logEntry);
-        if (logLevelString != null)
-        {
-            var logLevelColors = GetLogLevelConsoleColors(logEntry.LogLevel);
-            WriteColoredMessage(textWriter, logLevelString, logLevelColors?.Foreground, logLevelColors?.Background);
-        }
+        // [Category]
+        textWriter.Write(" ");
+        WriteTagStart(textWriter);
+        WriteThemeStyle(textWriter, ThemeStyle.SecondaryText);
+        textWriter.Write(logEntry.Category);
+        WriteTagEnd(textWriter);
 
-        textWriter.Write(GetForegroundColorEscapeCode(ConsoleColor.Blue)); // reset to default foreground color
-        textWriter.Write("]");
+        // [Message]
         textWriter.Write(" ");
         textWriter.Write(message);
         textWriter.WriteLine();
     }
 
-    public void Dispose() => optionsReloadToken?.Dispose();
-
-    private void FormatLogEntry(TextWriter textWriter)
+    private void WriteThemeStyle(TextWriter textWriter, ThemeStyle themeStyle)
     {
-        textWriter.Write(formatterOptions.CustomPrefix);
+        var themeStyleString = formatterOptions.Theme!.GetStyle(themeStyle);
+        textWriter.Write(themeStyleString);
     }
+
+    public void Dispose() => optionsReloadToken?.Dispose();
 
     private void WriteTimeStamp(TextWriter textWriter)
     {
@@ -109,66 +109,59 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
             ? DateTime.UtcNow
             : DateTime.Now;
 
-        textWriter.Write($"""
-            {now.ToString(formatterOptions.TimestampFormat)}
-            """);
+        var theme = formatterOptions.Theme!.GetStyle(ThemeStyle.SecondaryText);
+        textWriter.Write($"{theme}{now.ToString(formatterOptions.TimestampFormat)}{AnsiStyleReset}");
     }
 
-    public static void WriteColoredString(StringBuilder sb, string message, ConsoleColor? foreground, ConsoleColor? background = null)
+    private void WritePrefix(TextWriter textWriter)
     {
-        if (background.HasValue)
-        {
-            sb.Append(GetBackgroundColorEscapeCode(background.Value));
-        }
-
-        if (foreground.HasValue)
-        {
-            sb.Append(GetForegroundColorEscapeCode(foreground.Value));
-        }
-
-        sb.Append(message);
-
-        if (foreground.HasValue)
-        {
-            sb.Append(DefaultForegroundColor); // reset to default foreground color
-        }
-
-        if (background.HasValue)
-        {
-            sb.Append(DefaultBackgroundColor); // reset to the background color
-        }
+        var theme = formatterOptions.Theme!.GetStyle(ThemeStyle.SecondaryText);
+        textWriter.Write($"{theme}{formatterOptions.CustomPrefix}{AnsiStyleReset}");
     }
 
-    public static void WriteColoredMessage(TextWriter textWriter, string message, ConsoleColor? foreground, ConsoleColor? background = null)
+    private void WriteSuffix(TextWriter textWriter)
     {
-        if (background.HasValue)
-        {
-            textWriter.Write(GetBackgroundColorEscapeCode(background.Value));
-        }
-
-        if (foreground.HasValue)
-        {
-            textWriter.Write(GetForegroundColorEscapeCode(foreground.Value));
-        }
-
-        textWriter.Write(message);
-        if (foreground.HasValue)
-        {
-            textWriter.Write(DefaultForegroundColor); // reset to default foreground color
-        }
-
-        if (background.HasValue)
-        {
-            textWriter.Write(DefaultBackgroundColor); // reset to the background color
-        }
+        var theme = formatterOptions.Theme!.GetStyle(ThemeStyle.SecondaryText);
+        textWriter.Write($"{theme}{formatterOptions.CustomSuffix}{AnsiStyleReset}");
     }
 
-    private static string GetLogLevelString<TState>(LogEntry<TState> logEntry)
+    private void WriteTagStart(TextWriter textWriter)
     {
-        return logEntry.LogLevel switch
+        var theme = formatterOptions.Theme!.GetStyle(ThemeStyle.SecondaryText);
+        textWriter.Write($"{theme}[{AnsiStyleReset}");
+    }
+
+    private void WriteTagEnd(TextWriter textWriter)
+    {
+        var theme = formatterOptions.Theme!.GetStyle(ThemeStyle.SecondaryText);
+        textWriter.Write($"{theme}]{AnsiStyleReset}");
+    }
+
+    public static void WriteLogLevel(TextWriter textWriter, LogLevel logLevel)
+    {
+        var logLevelMessage = GetLogLevelString(logLevel);
+        var theme = GetLogLevelThemeStyle(logLevel);
+        textWriter.Write($"{theme}{logLevelMessage}{AnsiStyleReset}");
+    }
+
+    public static string GetLogLevelThemeStyle(LogLevel logLevel) =>
+        logLevel switch
+        {
+            LogLevel.Trace => AnsiColorThemes.Code.GetStyle(ThemeStyle.LevelTrace),
+            LogLevel.Debug => AnsiColorThemes.Code.GetStyle(ThemeStyle.LevelDebug),
+            LogLevel.Information => AnsiColorThemes.Code.GetStyle(ThemeStyle.LevelInformation),
+            LogLevel.Warning => AnsiColorThemes.Code.GetStyle(ThemeStyle.LevelWarning),
+            LogLevel.Error => AnsiColorThemes.Code.GetStyle(ThemeStyle.LevelError),
+            LogLevel.Critical => AnsiColorThemes.Code.GetStyle(ThemeStyle.LevelCritical),
+            _ => AnsiColorThemes.Code.GetStyle(ThemeStyle.Text),
+        };
+
+    private static string GetLogLevelString(LogLevel logLevel)
+    {
+        return logLevel switch
         {
             LogLevel.Information => "INF",
-            LogLevel.Trace => "TRACE",
+            LogLevel.Trace => "TRC",
             LogLevel.Debug => "DBG",
             LogLevel.Warning => "WRN",
             LogLevel.Error => "ERR",
@@ -196,56 +189,8 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
             ConsoleColor.Cyan => "\x1B[1m\x1B[36m",
             ConsoleColor.White => "\x1B[1m\x1B[37m",
 
-            _ => DefaultForegroundColor
+            _ => AnsiStyleReset
         };
-
-    private static string GetBackgroundColorEscapeCode(ConsoleColor? color) =>
-        color switch
-        {
-            ConsoleColor.Black => "\x1B[40m",
-            ConsoleColor.DarkRed => "\x1B[41m",
-            ConsoleColor.DarkGreen => "\x1B[42m",
-            ConsoleColor.DarkYellow => "\x1B[43m",
-            ConsoleColor.DarkBlue => "\x1B[44m",
-            ConsoleColor.DarkMagenta => "\x1B[45m",
-            ConsoleColor.DarkCyan => "\x1B[46m",
-            ConsoleColor.Gray => "\x1B[47m",
-            _ => DefaultBackgroundColor // Use default background color
-        };
-
-    private static (ConsoleColor Foreground, ConsoleColor? Background)? GetLogLevelConsoleColors(LogLevel logLevel)
-    {
-        // We must explicitly set the background color if we are setting the foreground color,
-        // since just setting one can look bad on the users console.
-        return logLevel switch
-        {
-            LogLevel.Trace => (ConsoleColor.Blue, ConsoleColor.Black),
-            LogLevel.Debug => (ConsoleColor.Blue, ConsoleColor.Black),
-            LogLevel.Information => (ConsoleColor.White, null),
-            LogLevel.Warning => (ConsoleColor.Yellow, ConsoleColor.Black),
-            LogLevel.Error => (ConsoleColor.Black, ConsoleColor.DarkRed),
-            LogLevel.Critical => (ConsoleColor.White, ConsoleColor.DarkRed),
-            _ => null
-        };
-    }
-
-    private static string? ApplyTheme(KeyValuePair<string, object> item, AnsiColorTheme theme)
-    {
-        var result = item.Value switch
-        {
-            bool boolValue => WriteBoolean(boolValue),
-            int intValue => WriteInt(intValue),
-            string stringValue => WriteString(stringValue, theme),
-            double doubleValue => WriteDouble(doubleValue),
-            decimal decimalValue => WriteDecimal(decimalValue),
-            DateTime dateTimeValue => WriteDateTime(dateTimeValue),
-            TimeSpan timeSpanValue => WriteTimeSpan(timeSpanValue),
-            Guid guidValue => WriteGuid(guidValue),
-            _ => item.Value.ToString(),
-        };
-
-        return result;
-    }
 
     private static ConsoleColor GetItemColor(KeyValuePair<string, object> item) =>
         item.Value switch
@@ -261,25 +206,18 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
             _ => ConsoleColor.White,
         };
 
-    private static string WriteBoolean(bool value) => value.ToString();
-
-    private static string WriteInt(int value) => WriteInt(value);
-
-    private static string WriteString(string value, AnsiColorTheme theme)
-    {
-        //var stringStyle = theme.GetStyle(ThemeStyle.String);
-        //var textStyle = theme.GetStyle(ThemeStyle.Text);
-
-        return $"{ConsoleThemeStyleString}{value}{GetForegroundColorEscapeCode(ConsoleColor.White)}";
-    }
-
-    private static string WriteDouble(double value) => value.ToString();
-
-    private static string WriteDecimal(decimal value) => value.ToString();
-
-    private static string WriteDateTime(DateTime value) => value.ToString();
-
-    private static string WriteTimeSpan(TimeSpan value) => value.ToString();
-
-    private static string WriteGuid(Guid value) => value.ToString();
+    private static string GetItemThemeStyle(KeyValuePair<string, object> item, AnsiColorTheme theme) =>
+        item.Value switch
+        {
+            bool _ => theme.GetStyle(ThemeStyle.Boolean),
+            int _ => theme.GetStyle(ThemeStyle.Number),
+            string _ => theme.GetStyle(ThemeStyle.String),
+            double _ => theme.GetStyle(ThemeStyle.Number),
+            decimal _ => theme.GetStyle(ThemeStyle.Number),
+            DateTime _ => theme.GetStyle(ThemeStyle.Scalar),
+            TimeSpan _ => theme.GetStyle(ThemeStyle.Scalar),
+            Guid _ => theme.GetStyle(ThemeStyle.Scalar),
+            null => theme.GetStyle(ThemeStyle.Null),
+            _ => theme.GetStyle(ThemeStyle.Text),
+        };
 }
